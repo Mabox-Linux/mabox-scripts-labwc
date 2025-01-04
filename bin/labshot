@@ -1,0 +1,264 @@
+#!/bin/sh
+
+## Labshot: a helper for screenshots within Labwc
+## Requirements:
+##  - `grim`: screenshot utility for wayland
+##  - `slurp`: to select an area
+##  - `wl-copy`: clipboard utility
+##  - `notify-send`: to show notifications
+##  - `xdg-open`: to show image, open directory
+## Those are needed to be installed, if unsure, run `labshot check`
+##
+## See `man 1 labshot` or `labshot usage` for further details.
+
+when() {
+  condition=$1
+  action=$2
+
+  if eval "$condition"; then
+    eval "$action"
+  fi
+}
+
+whenOtherwise() {
+  condition=$1
+  true_action=$2
+  false_action=$3
+
+  if eval "$condition"; then
+    eval "$true_action"
+  else
+    eval "$false_action"
+  fi
+}
+
+any() {
+  for tuple in "$@"; do
+    condition=$(echo "$tuple" | cut -d: -f1)
+    action=$(echo "$tuple" | cut -d: -f2-)
+    if eval "$condition"; then
+      eval "$action"
+      return 0
+    fi
+  done
+  return 1  # No conditions matched
+}
+
+NOTIFY=no
+CURSOR=
+WAIT=no
+
+getTargetDirectory() {
+  test -f "${XDG_CONFIG_HOME:-$HOME/.config}/user-dirs.dirs" &&
+    . "${XDG_CONFIG_HOME:-$HOME/.config}/user-dirs.dirs"
+
+  echo "${XDG_SCREENSHOTS_DIR:-${XDG_PICTURES_DIR:-$HOME}}"
+}
+
+parseArgs() {
+  POSITIONAL_ARGS=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    -n | --notify)
+      NOTIFY=yes
+      shift
+      ;;
+    -c | --cursor)
+      CURSOR=yes
+      shift
+      ;;
+    -w | --wait)
+      shift
+      WAIT="$1"
+      if echo "$WAIT" | grep "[^0-9]" -q; then
+        echo "invalid value for wait '$WAIT'" >&2
+        exit 3
+      fi
+      shift
+      ;;
+    *)                                      # Treat anything else as a positional argument
+      POSITIONAL_ARGS="$POSITIONAL_ARGS $1" # Add positional argument to the string
+      shift
+      ;;
+    esac
+  done
+
+  set -- $POSITIONAL_ARGS # Re-assign positional arguments
+  ACTION=${1:-usage}
+  SUBJECT=${2:-screen}
+  FILE=${3:-$(getTargetDirectory)/$(date +%Y-%m-%d_%H-%m-%s).png}
+
+}
+
+printUsageMsg() {
+  echo "Usage:"
+  echo "  labshot [--notify] [--cursor] [--wait N] (copy|save) [screen|area] [FILE|-]"
+  echo "  labshot check"
+  echo "  labshot usage"
+  echo ""
+  echo "Commands:"
+  echo "  copy: Copy the screenshot data into the clipboard."
+  echo "  save: Save the screenshot to a regular file or '-' to pipe to STDOUT."
+  echo "  savecopy: Save the screenshot to a regular file and copy the data into the clipboard."
+  echo "  check: Verify if required tools are installed and exit."
+  echo "  usage: Show this message and exit."
+  echo ""
+  echo "Targets:"
+  echo "  screen: All visible outputs."
+  echo "  area: Manually select a region."
+  exit
+}
+
+notify() {
+  if [ "$ACTION" = "copy" ]; then
+    notify-send -t 3000 -a grimshot "$@"
+  else
+    action=$(notify-send -t 3000 -a grimshot --action=file='Open File' --action=dir='Open Directory' "$@")
+    if [ "$action" = "file" ]; then
+      xdg-open "$FILE"
+    elif [ "$action" = "dir" ]; then
+      xdg-open "$(dirname "$FILE")"
+    fi
+  fi
+}
+
+notifyOk() {
+  notify_disabled='[ "$NOTIFY" = "no" ]'
+  action_involves_saving='[ "$ACTION" = "save" ] || [ "$ACTION" = "savecopy" ]'
+
+  when "$notify_disabled" "return"
+
+  TITLE=${2:-"Screenshot"}
+  MESSAGE=${1:-"OK"}
+
+  whenOtherwise "$action_involves_saving" \
+    'notify "$TITLE" "$MESSAGE" -i "$FILE"' \
+    'notify "$TITLE" "$MESSAGE"'
+}
+
+notifyError() {
+  notify_enabled='[ "$NOTIFY" = "yes" ]'
+  TITLE=${2:-"Screenshot"}
+  errorMssg=$1
+  MESSAGE=${errorMssg:-"Error taking screenshot with grim"}
+
+  whenOtherwise "$notify_enabled" \
+    'notify "$TITLE" "$MESSAGE" -u critical' \
+    'echo "$errorMssg"'
+}
+
+die() {
+  MSG=${1:-Bye}
+  notifyError "Error: $MSG"
+  exit 2
+}
+
+check() {
+  COMMAND=$1
+  command_exists='command -v "$COMMAND" > /dev/null 2>&1'
+
+  whenOtherwise "$command_exists" \
+    'RESULT="OK"' \
+    'RESULT="NOT FOUND"'
+
+  echo "   $COMMAND: $RESULT"
+}
+
+takeScreenshot() {
+  FILE=$1
+  GEOM=$2
+  OUTPUT=$3
+
+  output_provided='[ -n "$OUTPUT" ]'
+  geom_not_provided='[ -z "$GEOM" ]'
+
+  output_action='grim ${CURSOR:+-c} -o "$OUTPUT" "$FILE" || die "Unable to invoke grim"'
+  full_screenshot_action='grim ${CURSOR:+-c} "$FILE" || die "Unable to invoke grim"'
+  geometry_screenshot_action='grim ${CURSOR:+-c} -g "$GEOM" "$FILE" || die "Unable to invoke grim"'
+
+  any \
+    "$output_provided:$output_action" \
+    "$geom_not_provided:$full_screenshot_action" \
+    "true:$geometry_screenshot_action"
+}
+checkRequiredTools() {
+  echo "Checking if required tools are installed. If something is missing, install it to your system and make it available in PATH..."
+  check grim
+  check slurp
+  check wl-copy
+  check notify-send
+  check xdg-open
+  exit
+}
+
+selectArea() {
+  GEOM=$(slurp -d)
+  geomIsEmpty='[ -z "$GEOM" ]'
+  when "$geomIsEmpty" "exit 1"
+  WHAT="Area"
+}
+
+
+selectScreen() {
+  GEOM=""
+  WHAT="Screen"
+}
+
+handleSaveCopy() {
+  wl-copy --type image/png <"$FILE" || die "Clipboard error"
+  MESSAGE="$MESSAGE and clipboard"
+}
+
+handleScreenshotSuccess() {
+  TITLE="Screenshot of $SUBJECT"
+  MESSAGE=$(basename "$FILE")
+  isSaveCopy='[ "$ACTION" = "savecopy" ]'
+  when "$isSaveCopy" "handleSaveCopy"
+  notifyOk "$MESSAGE" "$TITLE"
+  echo "$FILE"
+}
+
+handleScreenshotFailure() {
+  notifyError "Error taking screenshot with grim"
+}
+
+handleCopy() {
+  takeScreenshot - "$GEOM" "$OUTPUT" | wl-copy --type image/png || die "Clipboard error"
+  notifyOk "$WHAT copied to clipboard"
+}
+
+handleSave() {
+  screenshotTaken="takeScreenshot \"$FILE\" \"$GEOM\" \"$OUTPUT\""
+  whenOtherwise "$screenshotTaken" \
+    "handleScreenshotSuccess" \
+    "handleScreenshotFailure"
+}
+handleUnknownSubject() {
+  die "Unknown subject to take a screenshot from" "$SUBJECT"
+}
+handleScreenshot() {
+  actionIsInvalid='[ "$ACTION" != "save" ] && [ "$ACTION" != "copy" ] && [ "$ACTION" != "savecopy" ] && [ "$ACTION" != "check" ]'
+  actionIsCheck='[ "$ACTION" = "check" ]'
+  subjectIsArea='[ "$SUBJECT" = "area" ]'
+  subjectIsScreen='[ "$SUBJECT" = "screen" ]'
+  subjectIsUnknown=true
+  any \
+    "$actionIsInvalid:printUsageMsg" \
+    "$actionIsCheck:checkRequiredTools" \
+    "$subjectIsArea:selectArea" \
+    "$subjectIsScreen:selectScreen" \
+    "$subjectIsUnknown:handleUnknownSubject"
+
+  wait='[ "$WAIT" != "no" ]'
+  when "$wait" "sleep $WAIT"
+
+  actionIsCopy='[ "$ACTION" = "copy" ]'
+
+  whenOtherwise "$actionIsCopy" \
+    "handleCopy" \
+    "handleSave"
+}
+
+parseArgs "$@"
+handleScreenshot
