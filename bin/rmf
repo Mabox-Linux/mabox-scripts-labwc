@@ -1,0 +1,13 @@
+#!/bin/bash
+# rmf - (r)un (m)inimize or (f)ocus 
+
+[[ -z "$1" ]] && echo "Usage: ${0##*/} executable" && exit 1
+
+# if active -> minimize
+wlrctl window find ${1} state:active && wlrctl window minimize ${1} && exit 0
+
+# if minimized or inactive -> give focus 
+wlrctl window find ${1} state:minimized && wlrctl window focus ${1} && exit 0
+wlrctl window find ${1} state:inactive && wlrctl window focus ${1} && exit 0
+${1} 2>&1 &
+disown

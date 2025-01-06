@@ -1,0 +1,17 @@
+#!/bin/bash
+# toggleShowDesktop - Openbox's missing action for Labwc
+
+CACHE_FILE="$HOME/.cache/.tsd"
+
+# If any window is unminimized 
+if wlrctl window find state:unminimized; then
+	# fill CACHE FILE with unminimized windows list
+	wlrctl window list state:unminimized > $CACHE_FILE
+	wlrctl window minimize state:unminimized
+else # no unminimized windows: check list and unminimize (focus) all
+	while IFS=':' read -r app_id title; do
+		wlrctl window focus app_id:$app_id state:minimized
+	done < "$CACHE_FILE"
+	#done < <(tac "$CACHE_FILE")
+	> "$CACHE_FILE"
+fi
