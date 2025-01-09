@@ -1,5 +1,5 @@
 #!/bin/bash
-# rmf - (r)un (m)inimize or (f)ocus 
+# runraisehide - run or raise and hide 
 
 [[ -z "$1" ]] && echo "Usage: ${0##*/} executable" && exit 1
 
@@ -11,3 +11,4 @@ wlrctl window find ${1} state:minimized && wlrctl window focus ${1} && exit 0
 wlrctl window find ${1} state:inactive && wlrctl window focus ${1} && exit 0
 ${1} 2>&1 &
 disown
+
