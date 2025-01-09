@@ -1,2 +1,2 @@
 #!/bin/bash
-foot --override app-id=q-term
+foot -c ~/.config/foot/q-term.ini --override app-id=q-term

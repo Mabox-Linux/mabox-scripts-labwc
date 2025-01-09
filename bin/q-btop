@@ -1,2 +1,2 @@
 #!/bin/bash
-foot --override app-id=q-term -T 'Btop - a monitor of resources' btop
+foot --override app-id=q-btop -T 'Btop - a monitor of resources' btop
