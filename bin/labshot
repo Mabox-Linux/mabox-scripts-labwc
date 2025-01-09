@@ -88,7 +88,6 @@ parseArgs() {
   ACTION=${1:-usage}
   SUBJECT=${2:-screen}
   FILE=${3:-$(getTargetDirectory)/$(date +%Y-%m-%d_%H-%m-%s).png}
-
 }
 
 printUsageMsg() {
@@ -124,6 +123,7 @@ notify() {
 }
 
 notifyOk() {
+if [[ "$FILE" == "-" ]];then return;fi
   notify_disabled='[ "$NOTIFY" = "no" ]'
   action_involves_saving='[ "$ACTION" = "save" ] || [ "$ACTION" = "savecopy" ]'
 
